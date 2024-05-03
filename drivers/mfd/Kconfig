@@ -2,3 +2,13 @@ config MFD_ATMEL_SMC
        bool "Atmel Static Memory Controller driver"
        help
 	Say yes here to support Atmel Static Memory Controller driver.
+
+config MFD_RP1
+	tristate "RP1 MFD driver"
+	depends on PCI
+	help
+	  Support for the RP1 peripheral chip.
+
+	  This driver provides support for the Raspberry Pi RP1 peripheral chip.
+	  It is responsible for enabling the Device Tree node once the PCIe endpoint
+	  has been configureds.
