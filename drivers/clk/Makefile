@@ -59,3 +59,4 @@ obj-$(CONFIG_MACH_PIC32) += clk_pic32.o
 obj-$(CONFIG_SANDBOX_CLK_CCF) += clk_sandbox_ccf.o
 obj-$(CONFIG_SANDBOX) += clk_sandbox.o
 obj-$(CONFIG_SANDBOX) += clk_sandbox_test.o
+obj-$(CONFIG_CLK_RP1) += clk-rp1.o

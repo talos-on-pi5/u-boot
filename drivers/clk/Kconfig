@@ -56,6 +56,13 @@ config CLK_BOSTON
 	help
 	  Enable this to support the clocks
 
+config CLK_RP1
+	bool "Raspberry Pi RP1-based clock support"
+	depends on PCI && CLK
+	help
+	  Enable common clock framework support for Raspberry Pi RP1
+	  support.
+
 config SPL_CLK_CCF
 	bool "SPL Common Clock Framework [CCF] support"
 	depends on SPL
