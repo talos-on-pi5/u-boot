@@ -31,6 +31,7 @@
  * core modifications here...
  */
 
+#include <broadcom/bcm_board_types.h>
 #include <net.h>
 #include <malloc.h>
 #include <miiphy.h>
@@ -44,6 +45,7 @@
 #include <linux/errno.h>
 
 #include "macb.h"
+#include "phys2bus.h"
 
 DECLARE_GLOBAL_DATA_PTR;
 
@@ -102,6 +104,8 @@ struct macb_dma_desc_64 {
 #define RXBUF_FRMLEN_MASK	0x00000fff
 #define TXBUF_FRMLEN_MASK	0x000007ff
 
+#define msleep(x) udelay((x) * 1000)
+
 struct macb_device {
 	void			*regs;
 
@@ -141,6 +145,10 @@ struct macb_device {
 	unsigned long		pclk_rate;
 #endif
 	phy_interface_t		phy_interface;
+
+	struct gpio_desc phy_reset_gpio;
+	int phy_reset_ms;
+	struct udevice *udev;
 };
 
 struct macb_usrio_cfg {
@@ -272,47 +280,70 @@ int macb_miiphy_write(struct mii_dev *bus, int phy_adr, int devad, int reg,
 
 	arch_get_mdio_control(bus->name);
 	macb_mdio_write(macb, phy_adr, reg, value);
+	return 0;
+}
 
+static int macb_miiphy_reset(struct mii_dev *bus)
+{
+	struct udevice *dev = eth_get_dev_by_name(bus->name);
+	struct macb_device *macb = dev_get_priv(dev);
+
+	if (!dm_gpio_is_valid(&macb->phy_reset_gpio))
+		return 0;
+
+	dm_gpio_set_value(&macb->phy_reset_gpio, 1);
+	msleep(macb->phy_reset_ms);
+	dm_gpio_set_value(&macb->phy_reset_gpio, 0);
 	return 0;
 }
 #endif
 
 #define RX	1
 #define TX	0
+
+/*
+ * NOTE: To handle buffers - rx_ring and tx_ring addresses should be used instead
+ * of rx_buffer_dma and tx_buffer_dma. That is because on the several boards this
+ * controller could be connected via PCIe or similar instead of the direct connection.
+ * For example in BCM2712 macb controller is connected to RP1 chip via PCIe.
+ * When macb is connected directly to the SOC the rx_ring and tx_ring are the same
+ * as rx_buffer_dma and tx_buffer_dma.
+ */
+
 static inline void macb_invalidate_ring_desc(struct macb_device *macb, bool rx)
 {
 	if (rx)
-		invalidate_dcache_range(macb->rx_ring_dma,
-			ALIGN(macb->rx_ring_dma + MACB_RX_DMA_DESC_SIZE,
-			      PKTALIGN));
+		invalidate_dcache_range((ulong)(macb->rx_ring), ALIGN((ulong)(macb->rx_ring) +
+					MACB_RX_DMA_DESC_SIZE, PKTALIGN));
 	else
-		invalidate_dcache_range(macb->tx_ring_dma,
-			ALIGN(macb->tx_ring_dma + MACB_TX_DMA_DESC_SIZE,
-			      PKTALIGN));
+		invalidate_dcache_range((unsigned long)macb->tx_ring,
+					ALIGN((unsigned long)macb->tx_ring +
+					      MACB_TX_DMA_DESC_SIZE, PKTALIGN));
 }
 
 static inline void macb_flush_ring_desc(struct macb_device *macb, bool rx)
 {
 	if (rx)
-		flush_dcache_range(macb->rx_ring_dma, macb->rx_ring_dma +
-				   ALIGN(MACB_RX_DMA_DESC_SIZE, PKTALIGN));
+		flush_dcache_range((ulong)(macb->rx_ring),
+				   (ulong)(macb->rx_ring) + ALIGN(MACB_RX_DMA_DESC_SIZE, PKTALIGN));
 	else
-		flush_dcache_range(macb->tx_ring_dma, macb->tx_ring_dma +
+		flush_dcache_range((unsigned long)macb->tx_ring,
+				   (unsigned long)macb->tx_ring +
 				   ALIGN(MACB_TX_DMA_DESC_SIZE, PKTALIGN));
 }
 
 static inline void macb_flush_rx_buffer(struct macb_device *macb)
 {
-	flush_dcache_range(macb->rx_buffer_dma, macb->rx_buffer_dma +
-			   ALIGN(macb->rx_buffer_size * MACB_RX_RING_SIZE,
-				 PKTALIGN));
+	flush_dcache_range((ulong)macb->rx_buffer,
+			   (ulong)macb->rx_buffer +
+			   ALIGN(macb->rx_buffer_size * MACB_RX_RING_SIZE, PKTALIGN));
 }
 
 static inline void macb_invalidate_rx_buffer(struct macb_device *macb)
 {
-	invalidate_dcache_range(macb->rx_buffer_dma, macb->rx_buffer_dma +
-				ALIGN(macb->rx_buffer_size * MACB_RX_RING_SIZE,
-				      PKTALIGN));
+	invalidate_dcache_range((ulong)macb->rx_buffer,
+				(ulong)macb->rx_buffer +
+				ALIGN(macb->rx_buffer_size * MACB_RX_RING_SIZE, PKTALIGN));
 }
 
 #if defined(CONFIG_CMD_NET)
@@ -338,12 +369,12 @@ static void macb_set_addr(struct macb_device *macb, struct macb_dma_desc *desc,
 static int _macb_send(struct macb_device *macb, const char *name, void *packet,
 		      int length)
 {
-	unsigned long paddr, ctrl;
+	unsigned long paddr, dmaaddr, ctrl;
 	unsigned int tx_head = macb->tx_head;
 	int i;
 
 	paddr = dma_map_single(packet, length, DMA_TO_DEVICE);
-
+	dmaaddr = dev_phys_to_bus(macb->udev, paddr);
 	ctrl = length & TXBUF_FRMLEN_MASK;
 	ctrl |= MACB_BIT(TX_LAST);
 	if (tx_head == (MACB_TX_RING_SIZE - 1)) {
@@ -357,7 +388,7 @@ static int _macb_send(struct macb_device *macb, const char *name, void *packet,
 		tx_head = tx_head * 2;
 
 	macb->tx_ring[tx_head].ctrl = ctrl;
-	macb_set_addr(macb, &macb->tx_ring[tx_head], paddr);
+	macb_set_addr(macb, &macb->tx_ring[tx_head], dmaaddr);
 
 	barrier();
 	macb_flush_ring_desc(macb, TX);
@@ -665,6 +696,22 @@ int __weak macb_linkspd_cb(struct udevice *dev, unsigned int speed)
 	return 0;
 }
 
+static void gem_init_axi(struct macb_device *bp)
+{
+	u32 amp;
+
+	/* AXI pipeline setup - don't touch values unless specified in device
+	 * tree. Some hardware could have reset values > 1.
+	 */
+	amp = gem_readl(bp, AMP);
+
+	amp = GEM_BFINS(AW2B_FILL, 1 /*bp->use_aw2b_fill*/, amp);
+	amp = GEM_BFINS(AW2W_MAX_PIPE, 8, amp);
+	amp = GEM_BFINS(AR2R_MAX_PIPE, 8, amp);
+
+	gem_writel(bp, AMP, amp);
+}
+
 static int macb_phy_init(struct udevice *dev, const char *name)
 {
 	struct macb_device *macb = dev_get_priv(dev);
@@ -814,8 +861,8 @@ static int gmac_init_multi_queues(struct macb_device *macb)
 
 	macb->dummy_desc->ctrl = MACB_BIT(TX_USED);
 	macb->dummy_desc->addr = 0;
-	flush_dcache_range(macb->dummy_desc_dma, macb->dummy_desc_dma +
-			ALIGN(MACB_TX_DUMMY_DMA_DESC_SIZE, PKTALIGN));
+	flush_dcache_range((ulong)macb->dummy_desc,
+			   (ulong)macb->dummy_desc + ALIGN(MACB_TX_DUMMY_DMA_DESC_SIZE, PKTALIGN));
 	paddr = macb->dummy_desc_dma;
 
 	for (i = 1; i < num_queues; i++) {
@@ -918,6 +965,14 @@ static int _macb_init(struct udevice *dev, const char *name)
 		macb_writel(macb, RBQPH, upper_32_bits(macb->rx_ring_dma));
 		macb_writel(macb, TBQPH, upper_32_bits(macb->tx_ring_dma));
 	}
+
+	/*
+	 * Call axi bus init only for BCM2712 board which has macb
+	 * connected over PCIe.
+	 */
+	if ((IS_ENABLED(CONFIG_BCM2712)) &&
+			(gd_board_type() == BCM2712_RPI_5_B_NEW))
+		gem_init_axi(macb);
 
 	if (macb_is_gem(macb)) {
 		/* Initialize DMA properties */
@@ -1080,7 +1135,7 @@ static u32 macb_dbw(struct macb_device *macb)
 	}
 }
 
-static void _macb_eth_initialize(struct macb_device *macb)
+static void _macb_eth_initialize(struct macb_device *macb, struct udevice *dev)
 {
 	int id = 0;	/* This is not used by functions we call */
 	u32 ncfgr;
@@ -1094,12 +1149,22 @@ static void _macb_eth_initialize(struct macb_device *macb)
 	macb->rx_buffer = dma_alloc_coherent(macb->rx_buffer_size *
 					     MACB_RX_RING_SIZE,
 					     &macb->rx_buffer_dma);
+
+	macb->rx_buffer_dma = dev_phys_to_bus(dev, (ulong)macb->rx_buffer);
+
 	macb->rx_ring = dma_alloc_coherent(MACB_RX_DMA_DESC_SIZE,
 					   &macb->rx_ring_dma);
-	macb->tx_ring = dma_alloc_coherent(MACB_TX_DMA_DESC_SIZE,
-					   &macb->tx_ring_dma);
+
+	macb->rx_ring_dma = dev_phys_to_bus(dev, (ulong)macb->rx_ring);
+
+	macb->tx_ring = dma_alloc_coherent(MACB_TX_DMA_DESC_SIZE, &macb->tx_ring_dma);
+
+	macb->tx_ring_dma = dev_phys_to_bus(dev, (ulong)macb->tx_ring);
+
 	macb->dummy_desc = dma_alloc_coherent(MACB_TX_DUMMY_DMA_DESC_SIZE,
 					   &macb->dummy_desc_dma);
+
+	macb->dummy_desc_dma = dev_phys_to_bus(dev, (ulong)macb->dummy_desc);
 
 	/*
 	 * Do some basic initialization so that we at least can talk
@@ -1174,11 +1239,19 @@ static const struct eth_ops macb_eth_ops = {
 static int macb_enable_clk(struct udevice *dev)
 {
 	struct macb_device *macb = dev_get_priv(dev);
-	struct clk clk;
-	ulong clk_rate;
+	struct clk clk, hclk;
+	struct clk tsu_clk;
 	int ret;
 
-	ret = clk_get_by_index(dev, 0, &clk);
+	ret = clk_get_by_name(dev, "pclk", &clk);
+	if (ret)
+		return -EINVAL;
+
+	ret = clk_get_by_name_optional(dev, "hclk", &hclk);
+	if (ret)
+		return -EINVAL;
+
+	ret = clk_get_by_name_optional(dev, "tsu_clk", &tsu_clk);
 	if (ret)
 		return -EINVAL;
 
@@ -1191,11 +1264,17 @@ static int macb_enable_clk(struct udevice *dev)
 	if (ret && ret != -ENOSYS)
 		return ret;
 
-	clk_rate = clk_get_rate(&clk);
-	if (!clk_rate)
-		return -EINVAL;
+	ret = clk_enable(&hclk);
+	if (ret && ret != -ENOSYS)
+		return ret;
 
-	macb->pclk_rate = clk_rate;
+	ret = clk_enable(&tsu_clk);
+	if (ret && ret != -ENOSYS)
+		return ret;
+
+	macb->pclk_rate = 0xbebc200;
+	if (!macb->pclk_rate)
+		return -EINVAL;
 
 	return 0;
 }
@@ -1226,6 +1305,7 @@ static int macb_eth_probe(struct udevice *dev)
 	if (macb->phy_interface == PHY_INTERFACE_MODE_NA)
 		return -EINVAL;
 
+	macb->udev = dev;
 	/* Read phyaddr from DT */
 	if (!dev_read_phandle_with_args(dev, "phy-handle", NULL, 0, 0,
 					&phandle_args))
@@ -1251,7 +1331,7 @@ static int macb_eth_probe(struct udevice *dev)
 		return ret;
 #endif
 
-	_macb_eth_initialize(macb);
+	_macb_eth_initialize(macb, dev);
 
 #if defined(CONFIG_CMD_MII) || defined(CONFIG_PHYLIB)
 	macb->bus = mdio_alloc();
@@ -1260,6 +1340,7 @@ static int macb_eth_probe(struct udevice *dev)
 	strlcpy(macb->bus->name, dev->name, MDIO_NAME_LEN);
 	macb->bus->read = macb_miiphy_read;
 	macb->bus->write = macb_miiphy_write;
+	macb->bus->reset = macb_miiphy_reset;
 
 	ret = mdio_register(macb->bus);
 	if (ret < 0)
@@ -1301,6 +1382,7 @@ static int macb_eth_of_to_plat(struct udevice *dev)
 	void *blob = (void *)gd->fdt_blob;
 	int node = dev_of_offset(dev);
 	int fl_node, speed_fdt;
+	int ret;
 
 	/* fetch 'fixed-link' property */
 	fl_node = fdt_subnode_offset(blob, node, "fixed-link");
@@ -1323,6 +1405,16 @@ static int macb_eth_of_to_plat(struct udevice *dev)
 	pdata->iobase = (uintptr_t)dev_remap_addr(dev);
 	if (!pdata->iobase)
 		return -EINVAL;
+
+	/* optional PHY reset-related properties */
+	ret = gpio_request_by_name(dev, "phy-reset-gpios", 0, &macb->phy_reset_gpio,
+				   GPIOD_IS_OUT);
+	if (ret && ret != -ENOENT) {
+		printf("Failed to obtain phy-reset gpio\n");
+		return ret;
+	}
+
+	macb->phy_reset_ms = ofnode_read_s32_default(dev_ofnode(dev), "phy-reset-duration", 10);
 
 	return macb_late_eth_of_to_plat(dev);
 }

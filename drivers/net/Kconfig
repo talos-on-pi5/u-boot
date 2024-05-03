@@ -573,6 +573,7 @@ config MVPP2
 config MACB
 	bool "Cadence MACB/GEM Ethernet Interface"
 	select PHYLIB
+	select DM_GPIO
 	help
 	  The Cadence MACB ethernet interface is found on many Atmel
 	  AT91 and SAMA5 parts.  This driver also supports the Cadence

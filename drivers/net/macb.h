@@ -69,6 +69,7 @@
 #define GEM_USRIO		0x000c /* User IO */
 #define GEM_DMACFG		0x0010 /* DMA Configuration */
 #define GEM_JML			0x0048 /* Jumbo Max Length */
+#define GEM_AMP			0x0054 /* AXI Max Pipeline */
 #define GEM_HRB			0x0080 /* Hash Bottom */
 #define GEM_HRT			0x0084 /* Hash Top */
 #define GEM_SA1B		0x0088 /* Specific1 Bottom */
@@ -760,6 +761,21 @@
 #define GEM_RX_CSUM_IP_ONLY			1
 #define GEM_RX_CSUM_IP_TCP			2
 #define GEM_RX_CSUM_IP_UDP			3
+
+/* Bitfields in AMP */
+/* Maximum number of outstanding AXI read requests */
+#define GEM_AR2R_MAX_PIPE_OFFSET		0
+#define GEM_AR2R_MAX_PIPE_SIZE			8
+/* Maximum number of outstanding AXI write requests */
+#define GEM_AW2W_MAX_PIPE_OFFSET		8
+#define GEM_AW2W_MAX_PIPE_SIZE 8
+/* Select whether the max AW2W transactions operates between: */
+#define GEM_AW2B_FILL_OFFSET			16
+/*   0: the AW to W AXI channel */
+#define GEM_AW2B_FILL_AW2W			0
+/*   1: AW to B channel */
+#define GEM_AW2B_FILL_AW2B			1
+#define GEM_AW2B_FILL_SIZE			1
 
 /* limit RX checksum offload to TCP and UDP packets */
 #define GEM_RX_CSUM_CHECKED_MASK		2
