@@ -56,6 +56,10 @@ config BCM2711_64B
 	select BLOBLIST_ALLOC if GENERATE_ACPI_TABLE
 	select BLOBLIST_TABLES if GENERATE_ACPI_TABLE
 
+config BCM2712
+	bool "Broadcom BCM2712 SoC support"
+	depends on ARCH_BCM283X
+
 menu "Broadcom BCM283X family"
 	depends on ARCH_BCM283X
 choice
