@@ -374,16 +374,16 @@ int of_get_dma_range(const struct device_node *dev, phys_addr_t *cpu,
 	}
 
 	/* Get the address sizes both for the bus and its parent */
-	bus_node = of_match_bus((struct device_node*)dev);
-	bus_node->count_cells(dev, &na, &ns);
+	na = of_simple_addr_cells(dev);
+	ns = of_simple_size_cells(dev);
 	if (!OF_CHECK_COUNTS(na, ns)) {
 		printf("Bad cell count for %s\n", of_node_full_name(dev));
 		ret = -EINVAL;
 		goto out_parent;
 	}
 
-	bus_node = of_match_bus(parent);
-	bus_node->count_cells(parent, &pna, &pns);
+	bus_node = of_match_bus((struct device_node *)dev);
+	bus_node->count_cells(dev, &pna, &pns);
 	if (!OF_CHECK_COUNTS(pna, pns)) {
 		printf("Bad cell count for %s\n", of_node_full_name(parent));
 		ret = -EINVAL;
