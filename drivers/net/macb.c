@@ -38,7 +38,9 @@
 #include <linux/mii.h>
 #include <asm/io.h>
 #include <linux/dma-mapping.h>
+#if !defined(CONFIG_CLK)
 #include <asm/arch/clk.h>
+#endif
 #include <linux/errno.h>
 
 #include "macb.h"
