@@ -258,4 +258,12 @@ config RESET_SPACEMIT_K1
 	help
 	  Support for SPACEMIT's K1 Reset system. Basic Assert/Deassert
 	  is supported.
+
+config RESET_BCM7216
+	tristate "Broadcom STB RESCAL reset controller"
+	depends on DM_RESET
+	help
+	  This enables the RESCAL reset controller for SATA, PCIe0, or PCIe1 on
+	  BCM7216.
+
 endmenu

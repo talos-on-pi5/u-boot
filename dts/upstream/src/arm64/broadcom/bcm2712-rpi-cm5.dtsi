@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: (GPL-2.0 OR MIT)
-/dts-v1/;
 
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/clock/rp1.h>
@@ -11,8 +10,8 @@
 #include "bcm2712-ds.dtsi"
 
 / {
-	compatible = "raspberrypi,5-model-b", "brcm,bcm2712";
-	model = "Raspberry Pi 5";
+	compatible = "raspberrypi,5-compute-module", "brcm,bcm2712";
+	model = "Raspberry Pi Compute Module 5";
 
 	/* Will be filled by the bootloader */
 	memory@0 {
@@ -43,16 +42,11 @@
 	};
 
 	sd_io_1v8_reg: sd-io-1v8-reg {
-		compatible = "regulator-gpio";
+		compatible = "regulator-fixed";
 		regulator-name = "vdd-sd-io";
 		regulator-min-microvolt = <1800000>;
-		regulator-max-microvolt = <3300000>;
-		regulator-boot-on;
+		regulator-max-microvolt = <1800000>;
 		regulator-always-on;
-		regulator-settling-time-us = <5000>;
-		gpios = <&gio_aon 3 GPIO_ACTIVE_HIGH>;
-		states = <1800000 1>,
-			 <3300000 0>;
 	};
 
 	sd_vcc_reg: sd-vcc-reg {
@@ -95,14 +89,7 @@
 		compatible = "regulator-fixed";
 		regulator-name = "cam0_reg";
 		enable-active-high;
-		gpio = <&rp1_gpio 34 0>;  // CD0_IO0_MICCLK, to MIPI 0 connector
-	};
-
-	cam1_reg: cam1_reg {
-		compatible = "regulator-fixed";
-		regulator-name = "cam1_reg";
-		enable-active-high;
-		gpio = <&rp1_gpio 46 0>;  // CD1_IO0_MICCLK, to MIPI 1 connector
+		gpio = <&rp1_gpio 34 0>;  // CD0_IO0_MICCLK, to CAM_GPIO on connector
 	};
 
 	cam_dummy_reg: cam_dummy_reg {
@@ -175,6 +162,8 @@ rp1_target: &pcie2 {
 	phy1: ethernet-phy@1 {
 		reg = <0x1>;
 		brcm,powerdown-enable;
+		interrupt-parent = <&gpio>;
+		interrupts = <37 IRQ_TYPE_LEVEL_LOW>;
 	};
 };
 
@@ -203,21 +192,8 @@ aux: &dummy {};
 
 #include "bcm2712-rpi.dtsi"
 
-i2c_csi_dsi0: &i2c6 { // Note: This is for MIPI0 connector only
-	pinctrl-0 = <&rp1_i2c6_38_39>;
-	pinctrl-names = "default";
-	clock-frequency = <100000>;
-	symlink = "i2c-6";
+cam1_reg: &cam0_reg { // Shares CAM_GPIO with cam0_reg
 };
-
-i2c_csi_dsi1: &i2c4 { // Note: This is for MIPI1 connector only
-	pinctrl-0 = <&rp1_i2c4_40_41>;
-	pinctrl-names = "default";
-	clock-frequency = <100000>;
-	symlink = "i2c-4";
-};
-
-i2c_csi_dsi: &i2c_csi_dsi1 { }; // An alias for compatibility
 
 csi0: &rp1_csi0 { };
 csi1: &rp1_csi1 { };
@@ -307,27 +283,28 @@ dpi_16bit_gpio2:        &rp1_dpi_16bit_gpio2        { };
 	status = "disabled";
 };
 
-/* SDIO1 is used to drive the SD card */
+/* SDIO1 is used to drive the eMMC/SD card */
 &sdio1 {
-	pinctrl-0 = <&emmc_sd_pulls>, <&emmc_aon_cd_pins>;
+	pinctrl-0 = <&emmc_cmddat_pulls>, <&emmc_ds_pull>;
 	pinctrl-names = "default";
 	vqmmc-supply = <&sd_io_1v8_reg>;
 	vmmc-supply = <&sd_vcc_reg>;
-	bus-width = <4>;
+	bus-width = <8>;
 	sd-uhs-sdr50;
 	sd-uhs-ddr50;
 	sd-uhs-sdr104;
+	mmc-hs200-1_8v;
+	mmc-hs400-1_8v;
+	mmc-hs400-enhanced-strobe;
+	broken-cd;
 	supports-cqe = <1>;
-	cd-gpios = <&gio_aon 5 GPIO_ACTIVE_LOW>;
-	//no-1-8-v;
 	status = "okay";
 };
 
 &pinctrl_aon {
-	emmc_aon_cd_pins: emmc_aon_cd_pins {
-		function = "sd_card_g";
-		pins = "aon_gpio5";
-		bias-pull-up;
+	ant_pins: ant_pins {
+		function = "gpio";
+		pins = "aon_gpio5", "aon_gpio6";
 	};
 
 	/* Slight hack - only one PWM pin (status LED) is usable */
@@ -354,8 +331,14 @@ dpi_16bit_gpio2:        &rp1_dpi_16bit_gpio2        { };
 		pins = "gpio29";
 	};
 
-	emmc_sd_pulls: emmc_sd_pulls {
-		pins = "emmc_cmd", "emmc_dat0", "emmc_dat1", "emmc_dat2", "emmc_dat3";
+	emmc_ds_pull: emmc_ds_pull {
+		pins = "emmc_ds";
+		bias-pull-down;
+	};
+
+	emmc_cmddat_pulls: emmc_cmddat_pulls {
+		pins = "emmc_cmd", "emmc_dat0", "emmc_dat1", "emmc_dat2", "emmc_dat3",
+		       "emmc_dat4", "emmc_dat5", "emmc_dat6", "emmc_dat7";
 		bias-pull-up;
 	};
 };
@@ -419,7 +402,7 @@ dpi_16bit_gpio2:        &rp1_dpi_16bit_gpio2        { };
 
 /* SDIO2 drives the WLAN interface */
 &sdio2 {
-	pinctrl-0 = <&sdio2_30_pins>;
+	pinctrl-0 = <&sdio2_30_pins>, <&ant_pins>;
 	pinctrl-names = "default";
 	bus-width = <4>;
 	vmmc-supply = <&wl_on_reg>;
@@ -565,8 +548,8 @@ spi10_cs_pins: &spi10_cs_gpio1 {};
 		"-", // GPIO_011
 		"-", // GPIO_012
 		"-", // GPIO_013
-		"PCIE_SDA", // GPIO_014
-		"PCIE_SCL", // GPIO_015
+		"-", // GPIO_014
+		"-", // GPIO_015
 		"-", // GPIO_016
 		"-", // GPIO_017
 		"-", // GPIO_018
@@ -596,8 +579,8 @@ spi10_cs_pins: &spi10_cs_gpio1 {};
 		"RP1_RUN", // AON_GPIO_02
 		"SD_IOVDD_SEL", // AON_GPIO_03
 		"SD_PWR_ON", // AON_GPIO_04
-		"SD_CDET_N", // AON_GPIO_05
-		"SD_FLG_N", // AON_GPIO_06
+		"ANT1", // AON_GPIO_05
+		"ANT2", // AON_GPIO_06
 		"-", // AON_GPIO_07
 		"2712_WAKE", // AON_GPIO_08
 		"2712_STAT_LED", // AON_GPIO_09
@@ -624,6 +607,22 @@ spi10_cs_pins: &spi10_cs_gpio1 {};
 		gpios = <2 GPIO_ACTIVE_HIGH>;
 		output-high;
 		line-name = "RP1 RUN pin";
+	};
+
+	ant1: ant1-hog {
+		gpio-hog;
+		gpios = <5 GPIO_ACTIVE_HIGH>;
+		/* internal antenna enabled */
+		output-high;
+		line-name = "ant1";
+	};
+
+	ant2: ant2-hog {
+		gpio-hog;
+		gpios = <6 GPIO_ACTIVE_HIGH>;
+		/* external antenna disabled */
+		output-low;
+		line-name = "ant2";
 	};
 };
 
@@ -658,29 +657,29 @@ spi10_cs_pins: &spi10_cs_gpio1 {};
 		"GPIO26", // GPIO26
 		"GPIO27", // GPIO27
 
-		"PCIE_RP1_WAKE", // GPIO28
+		"PCIE_PWR_EN", // GPIO28
 		"FAN_TACH", // GPIO29
 		"HOST_SDA", // GPIO30
 		"HOST_SCL", // GPIO31
 		"ETH_RST_N", // GPIO32
-		"-", // GPIO33
+		"PCIE_DET_WAKE", // GPIO33
 
 		"CD0_IO0_MICCLK", // GPIO34
 		"CD0_IO0_MICDAT0", // GPIO35
 		"RP1_PCIE_CLKREQ_N", // GPIO36
-		"-", // GPIO37
-		"CD0_SDA", // GPIO38
-		"CD0_SCL", // GPIO39
-		"CD1_SDA", // GPIO40
-		"CD1_SCL", // GPIO41
+		"ETH_IRQ_N", // GPIO37
+		"SDA0", // GPIO38
+		"SCL0", // GPIO39
+		"-", // GPIO40
+		"-", // GPIO41
 		"USB_VBUS_EN", // GPIO42
-		"USB_OC_N", // GPIO43
+		"-", // GPIO43
 		"RP1_STAT_LED", // GPIO44
 		"FAN_PWM", // GPIO45
-		"CD1_IO0_MICCLK", // GPIO46
+		"-", // GPIO46
 		"2712_WAKE", // GPIO47
-		"CD1_IO1_MICDAT1", // GPIO48
-		"EN_MAX_USB_CUR", // GPIO49
+		"-", // GPIO48
+		"-", // GPIO49
 		"-", // GPIO50
 		"-", // GPIO51
 		"-", // GPIO52
@@ -690,33 +689,38 @@ spi10_cs_pins: &spi10_cs_gpio1 {};
 		function = "vbus1";
 		pins = "gpio42", "gpio43";
 	};
+
+	micclk1_hog {
+		gpio-hog;
+		gpios = <46 GPIO_ACTIVE_HIGH>;
+		output-high;
+	};
+
+	micdat1_hog {
+		gpio-hog;
+		gpios = <48 GPIO_ACTIVE_HIGH>;
+		output-high;
+	};
 };
 
 / {
 	__overrides__ {
+		ant1 =  <&ant1>,"output-high?=on",
+			<&ant1>, "output-low?=off",
+			<&ant2>, "output-high?=off",
+			<&ant2>, "output-low?=on";
+		ant2 =  <&ant1>,"output-high?=off",
+			<&ant1>, "output-low?=on",
+			<&ant2>, "output-high?=on",
+			<&ant2>, "output-low?=off";
+		noant = <&ant1>,"output-high?=off",
+			<&ant1>, "output-low?=on",
+			<&ant2>, "output-high?=off",
+			<&ant2>, "output-low?=on";
+		noanthogs = <&ant1>,"status=disabled",
+			<&ant2>, "status=disabled";
+		sd = <&sdio1>, "status";
+		sd_poll_once = <&sdio1>, "non-removable?";
 		sd_cqe = <&sdio1>, "supports-cqe:0";
 	};
-};
-
-&hvs {
-	clocks = <&firmware_clocks 4>, <&firmware_clocks 16>;
-	clock-names = "core", "disp";
-};
-
-&hdmi0 {
-	clocks = <&firmware_clocks 13>, <&firmware_clocks 14>, <&dvp 0>, <&clk_27MHz>;
-	clock-names = "hdmi", "bvb", "audio", "cec";
-};
-
-&hdmi1 {
-	clocks = <&firmware_clocks 13>, <&firmware_clocks 14>, <&dvp 1>, <&clk_27MHz>;
-	clock-names = "hdmi", "bvb", "audio", "cec";
-};
-
-&pcie1 {
-	brcm,clkreq-mode = "safe";
-};
-
-&pcie2 {
-	status = "okay";
 };

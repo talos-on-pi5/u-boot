@@ -54,7 +54,10 @@
 #define  MISC_CTRL_CFG_READ_UR_MODE_MASK          0x2000
 #define  MISC_CTRL_MAX_BURST_SIZE_MASK            0x300000
 #define  MISC_CTRL_MAX_BURST_SIZE_128             0x0
+#define  MISC_CTRL_MAX_BURST_SIZE_512             0x2
 #define  MISC_CTRL_SCB0_SIZE_MASK                 0xf8000000
+#define  MISC_CTRL_PCIE_RCB_64B_MODE_MASK         0x80
+#define  MISC_CTRL_PCIE_RCB_MPS_MODE_MASK         0x400
 
 #define PCIE_MISC_CPU_2_PCIE_MEM_WIN0_LO          0x400c
 #define PCIE_MISC_CPU_2_PCIE_MEM_WIN0_HI          0x4010
@@ -70,6 +73,7 @@
 #define PCIE_MISC_RC_BAR2_CONFIG_HI               0x4038
 #define PCIE_MISC_RC_BAR3_CONFIG_LO               0x403c
 #define  RC_BAR3_CONFIG_LO_SIZE_MASK                0x1f
+#define PCIE_MISC_RC_BAR4_CONFIG_LO               0x40d4
 #define PCIE_MISC_PCIE_STATUS                     0x4068
 #define  STATUS_PCIE_PORT_MASK                      0x80
 #define  STATUS_PCIE_PORT_SHIFT                        7
@@ -120,6 +124,7 @@
 #define PCIE_MISC_MISC_CTRL_SCB0_SIZE_MASK                      0xf8000000
 #define PCIE_MISC_MISC_CTRL_SCB1_SIZE_MASK                      0x7c00000
 #define PCIE_MISC_MISC_CTRL_SCB2_SIZE_MASK                      0x1f
+#define SCB_SIZE_MASK(x) PCIE_MISC_MISC_CTRL_SCB ## x ## _SIZE_MASK
 #define PCIE_MISC_RC_BAR2_CONFIG_LO_SIZE_MASK                   0x1f
 
 #define PCIE_RGR1_SW_INIT_1_INIT_MASK                           0x2
