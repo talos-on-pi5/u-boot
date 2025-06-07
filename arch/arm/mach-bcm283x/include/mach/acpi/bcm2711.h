@@ -45,24 +45,51 @@
 #define PCIE_RC_CFG_PRIV1_LINK_CAPABILITY         0x04dc
 #define  LINK_CAPABILITY_ASPM_SUPPORT_MASK         0xc00
 
+#define PCIE_MISC_RC_CONFIG_RETRY_TIMEOUT         0x405c
+
 #define PCIE_RC_DL_MDIO_ADDR                      0x1100
 #define PCIE_RC_DL_MDIO_WR_DATA                   0x1104
 #define PCIE_RC_DL_MDIO_RD_DATA                   0x1108
+
+#define PCIE_RC_PL_PHY_CTL_15                     0x184c
+#define PCIE_RC_PL_PHY_CTL_15_PM_CLK_PERIOD_MASK  0xff
 
 #define PCIE_MISC_MISC_CTRL                       0x4008
 #define  MISC_CTRL_SCB_ACCESS_EN_MASK             0x1000
 #define  MISC_CTRL_CFG_READ_UR_MODE_MASK          0x2000
 #define  MISC_CTRL_MAX_BURST_SIZE_MASK            0x300000
-#define  MISC_CTRL_MAX_BURST_SIZE_128             0x0
+#define  MISC_CTRL_MAX_BURST_SIZE_128(pcie)	\
+	((pcie)->cfg->offsets[RGR1_SW_INIT_1])
 #define  MISC_CTRL_SCB0_SIZE_MASK                 0xf8000000
+#define  MISC_CTRL_PCIE_RCB_MPS_MODE_MASK         0x400
 
 #define PCIE_MISC_CPU_2_PCIE_MEM_WIN0_LO          0x400c
 #define PCIE_MISC_CPU_2_PCIE_MEM_WIN0_HI          0x4010
 #define PCIE_MEM_WIN0_LO(win)	\
 		PCIE_MISC_CPU_2_PCIE_MEM_WIN0_LO + ((win) * 4)
 
+#define PCIE_MISC_UBUS_CTRL                                 0x40a4
+#define PCIE_MISC_UBUS_CTRL_UBUS_PCIE_REPLY_ERR_DIS_MASK    BIT(13)
+#define PCIE_MISC_UBUS_CTRL_UBUS_PCIE_REPLY_DECERR_DIS_MASK BIT(19)
+#define PCIE_MISC_UBUS_TIMEOUT                              0x40a8
+#define PCIE_MISC_UBUS_BAR1_CONFIG_REMAP_ACCESS_EN_MASK			BIT(0)
+#define PCIE_MISC_UBUS_BAR1_CONFIG_REMAP										0x40ac
+#define PCIE_MISC_UBUS_BAR4_CONFIG_REMAP										0x410c
+
+#define PCIE_MISC_CTRL_1                          0x40A0
+#define  PCIE_MISC_CTRL_1_EN_VDM_QOS_CONTROL_MASK BIT(5)
+
+#define PCIE_MISC_AXI_INTF_CTRL                   0x416C
+#define  AXI_EN_RCLK_QOS_ARRAY_FIX                BIT(13)
+#define  AXI_EN_QOS_UPDATE_TIMING_FIX             BIT(12)
+#define  AXI_DIS_QOS_GATING_IN_MASTER             BIT(11)
+#define  AXI_REQFIFO_EN_QOS_PROPAGATION           BIT(7)
+#define  AXI_MASTER_MAX_OUTSTANDING_REQUESTS_MASK	0x3f
+#define PCIE_MISC_AXI_READ_ERROR_DATA             0x4170
+
 #define PCIE_MEM_WIN0_HI(win)	\
 		PCIE_MISC_CPU_2_PCIE_MEM_WIN0_HI + ((win) * 4)
+#define PCIE_MISC_PCIE_CTRL                       0x4064
 #define PCIE_MISC_RC_BAR1_CONFIG_LO               0x402c
 #define  RC_BAR1_CONFIG_LO_SIZE_MASK                0x1f
 #define PCIE_MISC_RC_BAR2_CONFIG_LO               0x4034
@@ -70,6 +97,7 @@
 #define PCIE_MISC_RC_BAR2_CONFIG_HI               0x4038
 #define PCIE_MISC_RC_BAR3_CONFIG_LO               0x403c
 #define  RC_BAR3_CONFIG_LO_SIZE_MASK                0x1f
+#define PCIE_MISC_RC_BAR4_CONFIG_LO               0x40d4
 #define PCIE_MISC_PCIE_STATUS                     0x4068
 #define  STATUS_PCIE_PORT_MASK                      0x80
 #define  STATUS_PCIE_PORT_SHIFT                        7
@@ -93,7 +121,8 @@
 #define PCIE_MEM_WIN0_LIMIT_HI(win)	\
 	 PCIE_MISC_CPU_2_PCIE_MEM_WIN0_LIMIT_HI + ((win) * 8)
 
-#define PCIE_MISC_HARD_PCIE_HARD_DEBUG            0x4204
+#define PCIE_MISC_HARD_PCIE_HARD_DEBUG(pcie)	\
+			((pcie)->cfg->offsets[PCIE_HARD_DEBUG])
 #define  PCIE_HARD_DEBUG_SERDES_IDDQ_MASK         0x08000000
 
 #define PCIE_INTR2_CPU_STATUS                 0x4300
@@ -106,7 +135,8 @@
 #define PCIE_MSI_INTR2_CLR                    0x4508
 #define PCIE_MSI_INTR2_MASK_SET               0x4510
 
-#define PCIE_RGR1_SW_INIT_1                   0x9210
+#define PCIE_RGR1_SW_INIT_1(pcie)	\
+	((pcie)->cfg->offsets[RGR1_SW_INIT_1])
 #define PCIE_EXT_CFG_INDEX                    0x9000
 /* A small window pointing at the ECAM of the device selected by CFG_INDEX */
 #define PCIE_EXT_CFG_DATA                     0x8000
@@ -124,6 +154,7 @@
 
 #define PCIE_RGR1_SW_INIT_1_INIT_MASK                           0x2
 #define PCIE_RGR1_SW_INIT_1_PERST_MASK                          0x1
+#define PCIE_RGR1_SW_INIT_1_PERSTB_MASK                         0x4
 
 #define PCIE_MISC_HARD_PCIE_HARD_DEBUG_SERDES_IDDQ_MASK         0x08000000
 
