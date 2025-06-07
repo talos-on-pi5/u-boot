@@ -522,9 +522,9 @@ static void get_board_revision(void)
 		model = &models[rev_type];
 	}
 
-	if (IS_ENABLED(CONFIG_BOARD_TYPES)) {
+	#ifdef CONFIG_BOARD_TYPES
 		gd->board_type = rev_type;
-	}
+	#endif
 
 	printf("RPI %s (0x%x)\n", model->name, revision);
 }
