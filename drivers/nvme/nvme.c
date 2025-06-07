@@ -27,6 +27,37 @@
 #define IO_TIMEOUT		30
 #define MAX_PRP_POOL		512
 
+/**
+ * nvme_get_dma_address() - Translates a CPU physical address to a PCIe bus address for NVMe DMA
+ * @dev:  Pointer to the NVMe device structure
+ * @addr: CPU physical address to be used as a DMA buffer
+ *
+ * Translates a system physical address into a PCIe bus address as seen by an NVMe device
+ * for DMA operations. If the NVMe device is not attached to a PCI bus, the function returns
+ * the original address unchanged.
+ *
+ * Return: The translated PCIe bus address for use by the NVMe device.
+ */
+static phys_addr_t nvme_get_dma_address(struct nvme_dev *dev, phys_addr_t addr) {
+	struct udevice *bus = dev_get_parent(dev->udev);
+	if (!bus || device_get_uclass_id(bus) != UCLASS_PCI) {
+		return addr;
+	}
+
+	struct udevice *ctlr = pci_get_controller(bus);
+
+	int i = 0;
+	struct pci_region entry;
+	while (pci_get_dma_regions(ctlr, &entry, i++) == 0) {
+		if ((addr >= entry.phys_start) &&
+				(addr < entry.phys_start + entry.size))
+			return entry.bus_start - entry.phys_start + addr;
+	}
+
+	printf("Warning: No matching DMA inbound window found for NVMe assuming 1:1 mapping! (addr=0x%llx)\n", (unsigned long long)addr);
+	return addr;
+}
+
 static int nvme_wait_csts(struct nvme_dev *dev, u32 mask, u32 val)
 {
 	int timeout;
@@ -91,12 +122,12 @@ static int nvme_setup_prps(struct nvme_dev *dev, u64 *prp2,
 	i = 0;
 	while (nprps) {
 		if ((i == (prps_per_page - 1)) && nprps > 1) {
-			*(prp_pool + i) = cpu_to_le64((ulong)prp_pool +
-					page_size);
+			*(prp_pool + i) = cpu_to_le64(nvme_get_dma_address(dev, (ulong)prp_pool +
+					page_size));
 			i = 0;
 			prp_pool += page_size;
 		}
-		*(prp_pool + i++) = cpu_to_le64(dma_addr);
+		*(prp_pool + i++) = cpu_to_le64(nvme_get_dma_address(dev, dma_addr));
 		dma_addr += page_size;
 		nprps--;
 	}
@@ -393,8 +424,9 @@ static int nvme_configure_admin_queue(struct nvme_dev *dev)
 	dev->ctrl_config |= NVME_CC_IOSQES | NVME_CC_IOCQES;
 
 	writel(aqa, &dev->bar->aqa);
-	nvme_writeq((ulong)nvmeq->sq_cmds, &dev->bar->asq);
-	nvme_writeq((ulong)nvmeq->cqes, &dev->bar->acq);
+
+	nvme_writeq(nvme_get_dma_address(dev, (ulong)nvmeq->sq_cmds), &dev->bar->asq);
+	nvme_writeq(nvme_get_dma_address(dev, (ulong)nvmeq->cqes), &dev->bar->acq);
 
 	result = nvme_enable_ctrl(dev);
 	if (result)
@@ -420,7 +452,7 @@ static int nvme_alloc_cq(struct nvme_dev *dev, u16 qid,
 
 	memset(&c, 0, sizeof(c));
 	c.create_cq.opcode = nvme_admin_create_cq;
-	c.create_cq.prp1 = cpu_to_le64((ulong)nvmeq->cqes);
+	c.create_cq.prp1 = cpu_to_le64(nvme_get_dma_address(dev, (ulong)nvmeq->cqes));
 	c.create_cq.cqid = cpu_to_le16(qid);
 	c.create_cq.qsize = cpu_to_le16(nvmeq->q_depth - 1);
 	c.create_cq.cq_flags = cpu_to_le16(flags);
@@ -437,7 +469,7 @@ static int nvme_alloc_sq(struct nvme_dev *dev, u16 qid,
 
 	memset(&c, 0, sizeof(c));
 	c.create_sq.opcode = nvme_admin_create_sq;
-	c.create_sq.prp1 = cpu_to_le64((ulong)nvmeq->sq_cmds);
+	c.create_sq.prp1 = cpu_to_le64(nvme_get_dma_address(dev, (ulong)nvmeq->sq_cmds));
 	c.create_sq.sqid = cpu_to_le16(qid);
 	c.create_sq.qsize = cpu_to_le16(nvmeq->q_depth - 1);
 	c.create_sq.sq_flags = cpu_to_le16(flags);
@@ -458,14 +490,14 @@ int nvme_identify(struct nvme_dev *dev, unsigned nsid,
 	memset(&c, 0, sizeof(c));
 	c.identify.opcode = nvme_admin_identify;
 	c.identify.nsid = cpu_to_le32(nsid);
-	c.identify.prp1 = cpu_to_le64(dma_addr);
+	c.identify.prp1 = cpu_to_le64(nvme_get_dma_address(dev, dma_addr));
 
 	length -= (page_size - offset);
 	if (length <= 0) {
-		c.identify.prp2 = 0;
+		c.identify.prp2 = cpu_to_le64(nvme_get_dma_address(dev, 0));
 	} else {
 		dma_addr += (page_size - offset);
-		c.identify.prp2 = cpu_to_le64(dma_addr);
+		c.identify.prp2 = cpu_to_le64(nvme_get_dma_address(dev, dma_addr));
 	}
 
 	c.identify.cns = cpu_to_le32(cns);
@@ -490,7 +522,7 @@ int nvme_get_features(struct nvme_dev *dev, unsigned fid, unsigned nsid,
 	memset(&c, 0, sizeof(c));
 	c.features.opcode = nvme_admin_get_features;
 	c.features.nsid = cpu_to_le32(nsid);
-	c.features.prp1 = cpu_to_le64(dma_addr);
+	c.features.prp1 = cpu_to_le64(nvme_get_dma_address(dev, dma_addr));
 	c.features.fid = cpu_to_le32(fid);
 
 	ret = nvme_submit_admin_cmd(dev, &c, result);
@@ -516,7 +548,7 @@ int nvme_set_features(struct nvme_dev *dev, unsigned fid, unsigned dword11,
 
 	memset(&c, 0, sizeof(c));
 	c.features.opcode = nvme_admin_set_features;
-	c.features.prp1 = cpu_to_le64(dma_addr);
+	c.features.prp1 = cpu_to_le64(nvme_get_dma_address(dev, dma_addr));
 	c.features.fid = cpu_to_le32(fid);
 	c.features.dword11 = cpu_to_le32(dword11);
 
@@ -785,8 +817,9 @@ static ulong nvme_blk_rw(struct udevice *udev, lbaint_t blknr,
 		c.rw.slba = cpu_to_le64(slba);
 		slba += lbas;
 		c.rw.length = cpu_to_le16(lbas - 1);
-		c.rw.prp1 = cpu_to_le64(temp_buffer);
-		c.rw.prp2 = cpu_to_le64(prp2);
+		c.rw.prp1 = cpu_to_le64(nvme_get_dma_address(dev, temp_buffer));
+		c.rw.prp2 = cpu_to_le64(nvme_get_dma_address(dev, prp2));
+
 		status = nvme_submit_sync_cmd(dev->queues[NVME_IO_Q],
 				&c, NULL, IO_TIMEOUT);
 		if (status)
